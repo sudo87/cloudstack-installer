@@ -1152,9 +1152,9 @@ install_mysql_server() {
     if is_package_installed "$MYSQL_PKG"; then
         log "MySQL Server is already installed."
         set_tracker_field "$tracker_key" "yes"
-        return 0
+    else
+        install_pkg_with_progress_bar "MySQL Server" "$MYSQL_PKG" "$tracker_key"
     fi
-    install_pkg_with_progress_bar "MySQL Server" "$MYSQL_PKG" "$tracker_key"
     start_service_with_progress "$MYSQL_SERVICE" "MySQL" 60 90
 }
 
@@ -1220,13 +1220,6 @@ install_nfs_server() {
         return 0
     fi
 
-    if command -v exportfs &>/dev/null; then
-        log "NFS Server is already installed."
-        set_tracker_field "$tracker_key" "yes"
-        show_dialog "info" "NFS Server Installation" "NFS Server is already installed.\n\nSkipping installation."
-        return 0
-    fi
-
     local package_name=""
     local nfs_svc="nfs-server"
     case "$PACKAGE_MANAGER" in
@@ -1238,7 +1231,13 @@ install_nfs_server() {
             package_name="nfs-utils quota"
             ;;
     esac
-    install_pkg_with_progress_bar "NFS Server" "$package_name" "$tracker_key"
+    if is_package_installed "$package_name"; then
+        log "NFS Server is already installed."
+        show_dialog "info" "NFS Server Installation" "NFS Server is already installed.\n\nSkipping installation."
+        set_tracker_field "$tracker_key" "yes"
+    else
+        install_pkg_with_progress_bar "NFS Server" "$package_name" "$tracker_key"
+    fi
     start_service_with_progress "$nfs_svc" "NFS" 60 90
 }
 
