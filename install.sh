@@ -134,25 +134,56 @@ check_system_resources() {
 # Ensure kvm modules are loaded for KVM Agent
 check_kvm_support() {
     info_msg "Checking KVM prerequisites..."
-    if ! grep -E 'vmx|svm' /proc/cpuinfo >/dev/null; then
-        error_exit "CPU does not support hardware virtualization (agent)"
-    fi
-    success_msg "✓ CPU virtualization support detected"
+    ARCH=$(uname -m)
 
-    if grep -q vmx /proc/cpuinfo; then
-        MODULE="kvm_intel"
-    elif grep -q svm /proc/cpuinfo; then
-        MODULE="kvm_amd"
-    else
-        error_exit "Unable to determine CPU type for KVM module."
-    fi
+    case "$ARCH" in
+        x86_64)
+            # Existing x86_64 logic
+            if ! grep -E 'vmx|svm' /proc/cpuinfo >/dev/null; then
+                error_exit "CPU does not support hardware virtualization (agent)"
+            fi
+            success_msg "✓ CPU virtualization support detected"
 
-    modprobe "$MODULE" 2>/dev/null || true
-    # Validate loaded module
-    if ! grep -q "^${MODULE} " /proc/modules; then
-        error_exit "KVM module $MODULE is not loaded. Ensure virtualization is enabled in BIOS/UEFI."
-    fi
-    success_msg "✓ KVM kernel module ($MODULE) loaded"
+            if grep -q vmx /proc/cpuinfo; then
+                MODULE="kvm_intel"
+            elif grep -q svm /proc/cpuinfo; then
+                MODULE="kvm_amd"
+            else
+                error_exit "Unable to determine CPU type for KVM module."
+            fi
+
+            modprobe "$MODULE" 2>/dev/null || true
+            # Validate loaded module
+            if ! grep -q "^${MODULE} " /proc/modules; then
+                error_exit "KVM module $MODULE is not loaded. Ensure virtualization is enabled in BIOS/UEFI."
+            fi
+            success_msg "✓ KVM kernel module ($MODULE) loaded"
+            ;;
+        aarch64|arm64)
+            # ARM64/aarch64 logic
+            if [[ ! -e /dev/kvm ]]; then
+                info_msg "KVM device not found, attempting to load KVM module..."
+                modprobe kvm 2>/dev/null || true
+                # Brief pause to allow module to load
+                sleep 1
+            fi
+
+            if [[ -e /dev/kvm ]]; then
+                success_msg "✓ KVM is available at /dev/kvm"
+                # Check if module is loaded (may be built-in)
+                if grep -q "^kvm " /proc/modules 2>/dev/null; then
+                    success_msg "✓ KVM kernel module loaded"
+                else
+                    info_msg "KVM module may be built into the kernel"
+                fi
+            else
+                error_exit "KVM is not available. Ensure virtualization is enabled in firmware and KVM modules are available."
+            fi
+            ;;
+        *)
+            error_exit "Unsupported architecture: $ARCH. Only x86_64 and aarch64/arm64 are supported."
+            ;;
+    esac
 }
 
 validate_selinux() {
@@ -1749,6 +1780,22 @@ check_cloudmonkey_availability() {
     {
         echo "10"
         echo "# Checking CloudMonkey installation..."
+
+        local arch=$(uname -m)
+        # Download arm64 cmk if on arm64/aarch64 architecture
+        if [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
+            local cmk_bin="/usr/bin/cmk"
+            echo "20"
+            echo "# Downloading CloudMonkey (arm64)..."
+            local cmk_url="https://github.com/apache/cloudstack-cloudmonkey/releases/latest/download/cmk.linux.arm64"
+            if ! curl -fsSL -o "$cmk_bin" "$cmk_url" 2>/dev/null; then
+                update_progress_bar "100" "Failed to download CloudMonkey!"
+                return 1
+            fi
+
+            chmod +x "$cmk_bin"
+        fi
+
         if ! command -v cmk &>/dev/null; then
             update_progress_bar "100" "CloudMonkey (cmk) not found!"
             return 1
